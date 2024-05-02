@@ -1,11 +1,20 @@
 // Actual size in bits of the number
 const L: usize = 256;
 // Number of bits per limb
-const D: usize = 64;
+// We set it to 32 bits while operating on u128 to simulate working with 
+// with 120-bit limbs over a field size of 254 bits like in Noir.
+// We can't use 64 bits as the multiplication result can have limbs of size
+// 2 * D + ceil(log2(N)) which can be greater than 128 bits.
+// e.g. For D = 64 and N = 4, the multiplication result can have 
+// limbs of size 2 * 64 + ceil(log2(4)) = 130 bits.
+const D: usize = 32;
 // Take the ceiling of L/D
+// 256 / 32 = 8 limbs
 const N: usize = (L + D - 1) / D;
 // 2^128 - 1
-const P: [u128; N] = [0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF, 0, 0];
+const P: [u32; N] = [0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0, 0, 0, 0];
+// 2^32 to constrain the limb size
+const LIMB_MODULO: u128 = (2 as u128).pow(D as u32);
 
 fn biguint_equal<const SIZE : usize>(x: &[u128; SIZE], y: &[u128; SIZE]) -> bool {
     for i in 0..SIZE {
@@ -80,7 +89,7 @@ fn biguint_sub<const SIZE : usize>(x: &[u128; SIZE], y: &[u128; SIZE]) -> [u128;
     let mut res = [0; SIZE];
     let mut borrow = 0;
 
-    for i in 0..N {
+    for i in 0..SIZE {
         let (diff, new_borrow) = sbb(x[i], y[i], borrow);
         res[i] = diff;
         borrow = new_borrow;
@@ -89,15 +98,15 @@ fn biguint_sub<const SIZE : usize>(x: &[u128; SIZE], y: &[u128; SIZE]) -> [u128;
     res
 }
 
-fn adc(x: u128, y: u128, carry: u64) -> (u128, u64) {
-    let sum = x as u64 + y as u64 + carry;
-    let carry = if sum > u64::MAX { 1 } else { 0 };
-    (sum as u128, carry)
+fn adc(x: u128, y: u128, carry: u128) -> (u128, u128) {
+    let sum = x + y  + carry;
+    let carry = if sum >= LIMB_MODULO { 1 } else { 0 };
+    ((sum % LIMB_MODULO) as u128, carry)
 }
 
 fn biguint_add<const SIZE : usize>(x: &[u128; SIZE], y: &[u128; SIZE]) -> [u128; SIZE] {
     let mut res = [0; SIZE];
-    let mut carry = 0 as u64;
+    let mut carry = 0 as u128;
 
     for i in 0..SIZE {
         let (sum, new_carry) = adc(x[i], y[i], carry);
@@ -115,6 +124,24 @@ fn biguint_shift_left_limb<const SIZE : usize>(x: &[u128; SIZE], n: u64) -> ([u1
     let carry = if n == 0 { 0 } else { x[SIZE - 1] >> rshift };
 
     if n > 0 {
+        /*
+         * Example:
+         * Let x = 0b1110110111010111 be a 16-bit number represented as two 8 bits limbs in little-endian order
+         * like so: [0b11010111, 0b11101101].
+         * We shift x by n = 5 bits to the left -> x << 5.
+         * For the first limb, we have:
+         * 0b11010111 << 5 = 0b11100000
+         * For the second limb, we have:
+         * 0b11101101 << 5 = 0b10100000
+         * But doing the left shift of the first limb, we lost its 5 leftmost bits, thus we need to carry
+         * them over the following higher significance limb. Each limb has 8 bits, and since we want 
+         * the 5 original leftmost (most significants) bits of the first limb to be passed on the 5 rightmost 
+         * (least significants) bits of the second higher limb, we need to shift the first limb to 
+         * the right by 8 - 5 = 3 bits. Which give us: 0b11010111 >> 3 = 0b00011010. 
+         * We then OR this result with the left shifted second limb to combine the two 
+         * and get: 0b00011010 | 0b10100000 = 0b10111010.
+         * Which give us the final result: 0b1011101011100000 or in the limbs representation: [0b11100000, 0b10111010].
+         */
         res[0] = x[0] << n;
         for i in 1..SIZE {
             res[i] = (x[i] << n) | (x[i - 1] >> rshift);
@@ -167,8 +194,8 @@ fn biguint_shift_right<const SIZE : usize>(x: &[u128; SIZE], n: u64) -> [u128; S
         let rem = n % (D as u64);
 
         // for i in 0..shift_num {
-        for i in 0..N {
-            if i as u64 + shift_num < N as u64 {
+        for i in 0..SIZE {
+            if i as u64 + shift_num < SIZE as u64 {
                 res[i] = x[i as usize + shift_num as usize];
             }
         }
@@ -188,7 +215,7 @@ fn biguint_divide<const SIZE : usize>(x: &[u128; SIZE], y: &[u128; SIZE]) -> ([u
     let mut q = [0; SIZE];
     let mut r = x.clone();
     let bit_diff = biguint_bits_count(x) - biguint_bits_count(y);
-    let mut c = biguint_shift_left(y, bit_diff as u64);
+    let mut c = biguint_shift_left(&y, bit_diff as u64);
 
     let mut one = [0; SIZE];
     one[0] = 1;
@@ -207,26 +234,6 @@ fn biguint_divide<const SIZE : usize>(x: &[u128; SIZE], y: &[u128; SIZE]) -> ([u
     };
 
     (q, r)
-}
-
-fn compute_product(a: &[u128; N], b: &[u128; N]) -> [u128; N * 2 - 1] {
-    let mut a_times_b = [0; N * 2 - 1];
-    for i in 0..(N * 2 - 1) {
-        for j in 0..=i {
-            if j < N && i - j < N {
-                a_times_b[i] += a[j] * b[i - j];
-            }
-        }
-    }
-
-    // How many times does the a_times_b fit into P?
-    /*let (q, c) = biguint_divide(&a_times_b, &[P[0], P[1], 0, 0, 0, 0, 0]);
-
-    let p_times_q = biguint_multiply(&[P[0], P[1], 0, 0, 0, 0, 0], &q);
-
-    let output = biguint_sub(&c, &biguint_sub(&a_times_b, &p_times_q));
-    output*/
-    a_times_b
 }
 
 fn biguint_multiply<const SIZE : usize>(x: &[u128; SIZE], y: &[u128; SIZE]) -> [u128; SIZE] {
@@ -268,14 +275,43 @@ fn to_string(x: &[u128]) -> String {
     s
 }
 
+fn compute_product(a: &[u128; N], b: &[u128; N]) -> [u128; N * 2 - 1] {
+    let mut a_times_b = [0; N * 2 - 1];
+    for i in 0..(N * 2 - 1) {
+        for j in 0..=i {
+            if j < N && i - j < N {
+                a_times_b[i] += a[j] * b[i - j];
+            }
+        }
+    }
+
+    // How many times does the a_times_b fit into P?
+    /*let (q, c) = biguint_divide(&a_times_b, &[P[0], P[1], 0, 0, 0, 0, 0]);
+
+    let p_times_q = biguint_multiply(&[P[0], P[1], 0, 0, 0, 0, 0], &q);
+
+    let output = biguint_sub(&c, &biguint_sub(&a_times_b, &p_times_q));
+    output*/
+    a_times_b
+}
+
 fn main() {
-    let x: [u128; N] = [4, 0, 0, 0];
-    let y: [u128; N] = [2, 0, 0, 0];
-    let z: [u128; N * 2 - 1] = compute_product(&x, &y);
-    let (q, r) = biguint_divide(&x, &y);
-    println!("x = {}", to_string(&x));
-    println!("y = {}", to_string(&y));
-    println!("z = {}", to_string(&z));
-    println!("q = {}", to_string(&q));
-    println!("r = {}", to_string(&r));
+    let x: [u128; N] = [5, 0, 0, 0, 0, 0, 0, 0];
+    let y: [u128; N] = [3, 0, 0, 0, 0, 0, 0, 0];
+    let o: [u128; N * 2 - 1] = compute_product(&x, &y);
+    println!("o = {:?}", o);
+
+    let mut r: [u128;  N * 2 - 1] = [0; N * 2 - 1];
+    r[0] = o[0] / LIMB_MODULO;
+    for i in 1..(N * 2 - 2) {
+        r[i] = (o[i] - r[i - 1]) / LIMB_MODULO;
+    }
+    r[N * 2 - 2] = o[N * 2 - 2] - r[N * 2 - 3];
+    println!("r = {:?}", r);
+
+    /*let (q, r) = biguint_divide(&x, &y);
+    println!("x = {:?}", x);
+    println!("y = {:?}", y);
+    println!("q = {:?}", q);
+    println!("r = {:?}", r);*/
 }

@@ -12,7 +12,7 @@ const D: usize = 32;
 // 256 / 32 = 8 limbs
 const N: usize = (L + D - 1) / D;
 // 2^128 - 1
-const P: [u32; N] = [0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0, 0, 0, 0];
+const P: [u128; N] = [0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0, 0, 0, 0];
 // 2^32 to constrain the limb size
 const LIMB_MODULO: u128 = (2 as u128).pow(D as u32);
 
@@ -57,8 +57,9 @@ fn biguint_greater_than_or_equal<const SIZE : usize>(x: &[u128; SIZE], y: &[u128
 
 fn biguint_to_bits<const SIZE : usize>(x: &[u128; SIZE]) -> Vec<u8> {
     let mut bits = Vec::new();
-    for i in (0..SIZE).rev() {
-        for j in (0..D).rev() {
+    for i in 0..SIZE {
+        let max_non_zero_index = 128 - x[i].leading_zeros();
+        for j in 0..max_non_zero_index {
             bits.push((x[i] >> j) as u8 & 1);
         }
     }
@@ -261,16 +262,18 @@ fn biguint_karatsuba_multiply(x: &[u128; N], y: &[u128; N]) -> [u128; N] {
     [0; N]
 }
 
-fn to_string(x: &[u128]) -> String {
+fn biguint_to_binary_string<const SIZE : usize>(x: &[u128; SIZE]) -> String {
     let mut s = String::new();
-    let mut i = N - 1;
-    while i > 0 && x[i] == 0 {
-        i -= 1;
+    for i in (0..SIZE).rev() {
+        s.push_str(&format!("{:032b}", x[i]));
     }
-    s.push_str(&x[i].to_string());
-    while i > 0 {
-        i -= 1;
-        s.push_str(&format!("{:0>64}", x[i]));
+    s
+}
+
+fn biguint_to_hex_string<const SIZE : usize>(x: &[u128; SIZE]) -> String {
+    let mut s = String::new();
+    for i in (0..SIZE).rev() {
+        s.push_str(&format!("{:08x}", x[i]));
     }
     s
 }
@@ -286,32 +289,36 @@ fn compute_product(a: &[u128; N], b: &[u128; N]) -> [u128; N * 2 - 1] {
     }
 
     // How many times does the a_times_b fit into P?
-    /*let (q, c) = biguint_divide(&a_times_b, &[P[0], P[1], 0, 0, 0, 0, 0]);
+    let (q, c) = biguint_divide(&a_times_b, &[P[0], P[1], P[2], P[3], 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    println!("q = {}", biguint_to_hex_string(&q));
+    println!("c = {}", biguint_to_hex_string(&c));
 
-    let p_times_q = biguint_multiply(&[P[0], P[1], 0, 0, 0, 0, 0], &q);
+    let p_times_q = biguint_multiply(&[P[0], P[1], P[2], P[3], 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], &q);
+    println!("p_times_q = {}", biguint_to_hex_string(&p_times_q));
 
     let output = biguint_sub(&c, &biguint_sub(&a_times_b, &p_times_q));
-    output*/
+    println!("output = {}", biguint_to_hex_string(&output));
+    //output
     a_times_b
 }
 
 fn main() {
-    let x: [u128; N] = [5, 0, 0, 0, 0, 0, 0, 0];
-    let y: [u128; N] = [3, 0, 0, 0, 0, 0, 0, 0];
+    let x: [u128; N] = [0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0, 0, 0, 0];
+    println!("x = {}", biguint_to_hex_string(&x));
+    let y: [u128; N] = [0xffffffff, 0, 0, 0, 0, 0, 0, 0];
+    println!("y = {}", biguint_to_hex_string(&y));
     let o: [u128; N * 2 - 1] = compute_product(&x, &y);
     println!("o = {:?}", o);
 
-    let mut r: [u128;  N * 2 - 1] = [0; N * 2 - 1];
-    r[0] = o[0] / LIMB_MODULO;
+    let mut r: [i128;  N * 2 - 1] = [0; N * 2 - 1];
+    r[0] = (o[0] / LIMB_MODULO) as i128;
     for i in 1..(N * 2 - 2) {
-        r[i] = (o[i] - r[i - 1]) / LIMB_MODULO;
+        r[i] = (o[i]  as i128  - r[i - 1] as i128) / LIMB_MODULO as i128 ;
     }
-    r[N * 2 - 2] = o[N * 2 - 2] - r[N * 2 - 3];
+    r[N * 2 - 2] = o[N * 2 - 2] as i128 - r[N * 2 - 3];
     println!("r = {:?}", r);
 
-    /*let (q, r) = biguint_divide(&x, &y);
-    println!("x = {:?}", x);
-    println!("y = {:?}", y);
-    println!("q = {:?}", q);
-    println!("r = {:?}", r);*/
+    /*let (q, _r) = biguint_divide(&x, &y);
+    println!("q = {}", biguint_to_hex_string(&q));
+    println!("_r = {}", biguint_to_hex_string(&_r));*/
 }

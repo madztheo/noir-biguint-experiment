@@ -1,0 +1,6 @@
+[package]
+name = "noir_biguint"
+authors = ["Théo Madzou"]
+type = "bin"
+compiler_version = ">=0.22.0"
+

@@ -1,3 +1,10 @@
+/**
+ * This is for experimenting in Rust before moving on to Noir.
+ * A lot of the stuff down here doesn't work properly, so be warned.
+ * Feel free to use this as a draft before going to main.nr
+ */
+
+
 // Actual size in bits of the number
 const L: usize = 256;
 // Number of bits per limb
@@ -215,47 +222,10 @@ fn biguint_divide<const SIZE : usize>(x: &[u128; SIZE], y: &[u128; SIZE]) -> ([u
 
     let mut q = [0; SIZE];
     let mut r = x.clone();
-    let bit_diff = biguint_bits_count(x) - biguint_bits_count(y);
-    let mut c = biguint_shift_left(&y, bit_diff as u64);
 
-    let mut one = [0; SIZE];
-    one[0] = 1;
-
-    for i in 0..L+1 {
-        if i <= bit_diff {
-            if biguint_greater_than_or_equal(&r, &c) {
-                r = biguint_sub(&r, &c);
-                q = biguint_shift_left(&q, 1);
-                q = biguint_add(&q, &one);
-            } else {
-                q = biguint_shift_left(&q, 1);
-            }
-            c = biguint_shift_right(&c, 1);
-        }
-    };
+    // TODO: Implement the long division algorithm
 
     (q, r)
-}
-
-fn biguint_multiply<const SIZE : usize>(x: &[u128; SIZE], y: &[u128; SIZE]) -> [u128; SIZE] {
-    let mut z = [0; SIZE];
-    let mut tmp: [u128; N * 4] = [0; N * 4];
-    let mut carry: u128 = 0;
-    for i in 0..SIZE {
-        for j in 0..SIZE {
-            let res = (x[i] as u128) * (y[j] as u128) + (tmp[i + j] as u128) + carry;
-            let lo = res % (1 << D);
-            let hi = (res >> D) % (1 << D);
-            tmp[i + j] = lo;
-            tmp[i + j + 1] = hi;
-            carry = hi as u128 >> D;
-        }
-    }
-    for i in 0..SIZE {
-        z[i] = tmp[i] + carry;
-        carry = 0;
-    }
-    z
 }
 
 fn biguint_karatsuba_multiply(x: &[u128; N], y: &[u128; N]) -> [u128; N] {
@@ -289,7 +259,7 @@ fn compute_product(a: &[u128; N], b: &[u128; N]) -> [u128; N * 2 - 1] {
     }
 
     // How many times does the a_times_b fit into P?
-    let (q, c) = biguint_divide(&a_times_b, &[P[0], P[1], P[2], P[3], 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    /*let (q, c) = biguint_divide(&a_times_b, &[P[0], P[1], P[2], P[3], 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     println!("q = {}", biguint_to_hex_string(&q));
     println!("c = {}", biguint_to_hex_string(&c));
 
@@ -297,15 +267,15 @@ fn compute_product(a: &[u128; N], b: &[u128; N]) -> [u128; N * 2 - 1] {
     println!("p_times_q = {}", biguint_to_hex_string(&p_times_q));
 
     let output = biguint_sub(&c, &biguint_sub(&a_times_b, &p_times_q));
-    println!("output = {}", biguint_to_hex_string(&output));
+    println!("output = {}", biguint_to_hex_string(&output));*/
     //output
     a_times_b
 }
 
 fn main() {
-    let x: [u128; N] = [0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0, 0, 0, 0];
+    let x: [u128; N] = [5, 0, 0, 0, 0, 0, 0, 0];
     println!("x = {}", biguint_to_hex_string(&x));
-    let y: [u128; N] = [0xffffffff, 0, 0, 0, 0, 0, 0, 0];
+    let y: [u128; N] = [2, 0, 0, 0, 0, 0, 0, 0];
     println!("y = {}", biguint_to_hex_string(&y));
     let o: [u128; N * 2 - 1] = compute_product(&x, &y);
     println!("o = {:?}", o);

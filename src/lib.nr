@@ -34,7 +34,7 @@ unconstrained fn biguint_divide<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> ([F
     // Remainder
     let mut r = x;
 
-    // TODO: Implement a long division algorithm to x and y get the quotient and the remainder
+    // TODO: Implement a long division algorithm between two BigUint x and y to get the quotient and the remainder
     // c.f. https://people.eecs.berkeley.edu/~fateman/282/F%20Wright%20notes/week4.pdf
     // c.f. https://github.com/madztheo/noir-large-integer/blob/57dc1b45ff5cb90869602ef201e99adca1d5339b/crates/large-integer-64/src/lib.nr#L295
 

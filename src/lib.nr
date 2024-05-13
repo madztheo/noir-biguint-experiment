@@ -17,7 +17,7 @@ global N: u64 = (L + D - 1) / D;
 global P: [Field; N] = [0xffffffffffffffffffffffffffffff, 0xff, 0, 0, 0, 0, 0, 0, 0];
 // 2^120 to constrain the limb size
 global B: Field = 1329227995784915872903807060280344576;
-// BN254 modulus - 1
+// BN254 modulus - 1 => Max value of a Field
 global BN254_MINUS_1 = 21888242871839275222246405745257275088548364400416034343698204186575808495616;
 
 fn to_bits<SIZE>(val: [Field; SIZE]) -> [u1; L] {
@@ -145,7 +145,7 @@ fn shr<SIZE>(val: [Field; SIZE], n: u8) -> [Field; SIZE] {
 fn less_than<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> bool {
     let mut res = false;
     for i in 0..SIZE {
-        if U128::from_integer(x[SIZE - i - 1]) < U128::from_integer(y[SIZE - i - 1]) {
+        if x[SIZE - i - 1].lt(y[SIZE - i - 1]) {
             res = true;
         }
     }
@@ -156,7 +156,7 @@ fn less_than<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> bool {
 fn less_than_equal<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> bool {
     let mut res = false;
     for i in 0..SIZE {
-        if U128::from_integer(x[SIZE - i - 1]) <= U128::from_integer(y[SIZE - i - 1]) {
+        if (x[SIZE - i - 1].lt(y[SIZE - i - 1])) | (x[SIZE - i - 1] == y[SIZE - i - 1]) {
             res = true;
         }
     }
@@ -178,12 +178,10 @@ fn add<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> [Field; SIZE] {
     let m = nlimbs(x);
     let k = m - 1;
     let mut c = [0 as Field; SIZE];
-
-    let BASE = U128::from_integer(B);
     
     for i in 0..SIZE {
         let s = x[i] + y[i] + r;
-        if U128::from_integer(s) < BASE {
+        if s.lt(B) {
             c[i] = s;
             r = 0;
         } else {
@@ -206,10 +204,18 @@ fn sub<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> [Field; SIZE] {
     let mut r: Field = 0;
     let mut s: Field = 0;
     let mut c = [0 as Field; SIZE];
+
+    let max = 2 * B + N as Field;
     
     for i in 0..SIZE {
         s = x[i] - y[i] - r;
-        if U128::from_integer(x[i]) >= U128::from_integer(y[i]) + U128::from_integer(r) {
+        // We check that the number didn't wrap around (i.e. s >= 0)
+        // 2 * B + N (technically log2(N)) to account for operations over the result
+        // of multiplication of two Big Int
+        // If it's in between 2 * B + N and the modulus of BN254,
+        // then we can be sure it's supposed to be a negative number 
+        // so we add B to it in the else close to make it positive
+        if s.lt(max) {
             c[i] = s;
             r = 0;
         } else {
@@ -221,6 +227,18 @@ fn sub<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> [Field; SIZE] {
     c
 }
 
+fn mul<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> [Field; SIZE] {
+    // TODO: Implement multiplication of two big int
+    [0; SIZE]
+}
+
+fn find_quotient_limb<SIZE>(r: [Field; SIZE], b: [Field; SIZE]) -> Field {
+    // TODO: Implement Algorithm in 4.1 
+    // c.f. https://people.eecs.berkeley.edu/~fateman/282/F%20Wright%20notes/week4.pdf
+    0
+}
+
+// c.f. https://people.eecs.berkeley.edu/~fateman/282/F%20Wright%20notes/week4.pdf - Algorithm in 4
 unconstrained fn divide<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> ([Field; SIZE], [Field; SIZE]){
     if less_than(x, y) {
         ([0; SIZE], x)
@@ -234,19 +252,23 @@ unconstrained fn divide<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> ([Field; SI
     let k = m - n + 1;
 
     // Remainder
+    // TODO: Find a way to handle the proper size of r
     let mut r = [0; SIZE];
 
-    for i in 0..n {
-        r[i] = x[i];
+    for i in 1..n {
+        r[i] = x[i-1];
     }
 
     for i in 0..k {
-
+        q[i] = find_quotient_limb(r, y);
+        let mut q_i_long = [0; SIZE];
+        q_i_long[i] = q[i];
+        r = sub(r, mul(q_i_long, y));
+        if i != k - 1 {
+            r[n] = x[m - k + 1 + i];
+        }
     }
-
-    // TODO: Implement a long division algorithm between two BigUint x and y to get the quotient and the remainder
-    // c.f. https://people.eecs.berkeley.edu/~fateman/282/F%20Wright%20notes/week4.pdf
-    // c.f. https://github.com/madztheo/noir-large-integer/blob/57dc1b45ff5cb90869602ef201e99adca1d5339b/crates/large-integer-64/src/lib.nr#L295
+    
     (q, r)
 }
 

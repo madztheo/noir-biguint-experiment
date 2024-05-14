@@ -20,6 +20,27 @@ global B: Field = 1329227995784915872903807060280344576;
 // BN254 modulus - 1 => Max value of a Field
 global BN254_MINUS_1 = 21888242871839275222246405745257275088548364400416034343698204186575808495616;
 
+trait FieldUtils {
+    fn gte(self, other: Self) -> bool;
+    fn lte(self, other: Self) -> bool;
+    fn gt(self, other: Self) -> bool;
+}
+
+impl FieldUtils for Field {
+    fn gte(self, other: Self) -> bool {
+        (other.lt(self)) | (self == other)
+    }
+
+    fn lte(self, other: Self) -> bool {
+        (self.lt(other)) | (self == other)
+    }
+
+    fn gt(self, other: Self) -> bool {
+        other.lt(self)
+    }
+
+}
+
 fn to_bits<SIZE>(val: [Field; SIZE]) -> [u1; L] {
     let mut res = [0 as u1; L];
 
@@ -204,18 +225,12 @@ fn sub<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> [Field; SIZE] {
     let mut r: Field = 0;
     let mut s: Field = 0;
     let mut c = [0 as Field; SIZE];
-
-    let max = 2 * B + N as Field;
     
     for i in 0..SIZE {
         s = x[i] - y[i] - r;
-        // We check that the number didn't wrap around (i.e. s >= 0)
-        // 2 * B + N (technically log2(N)) to account for operations over the result
-        // of multiplication of two Big Int
-        // If it's in between 2 * B + N and the modulus of BN254,
-        // then we can be sure it's supposed to be a negative number 
-        // so we add B to it in the else close to make it positive
-        if s.lt(max) {
+        // We check that x[i] >= y[i] + r
+        // i.e. s >= 0
+        if x[i].gte(y[i] + r) {
             c[i] = s;
             r = 0;
         } else {
@@ -227,15 +242,48 @@ fn sub<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> [Field; SIZE] {
     c
 }
 
-fn mul<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> [Field; SIZE] {
+fn normalized_mul<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> [Field; SIZE] {
     // TODO: Implement multiplication of two big int
-    [0; SIZE]
+    let mut c: [Field; 2 * N] = [0; 2 * N];
+    let m = nlimbs(x);
+    let n = nlimbs(y);
+    let k = m + n;
+    let mut r: Field = 0;
+    
+    for i in 0..SIZE {
+        for j in 0..SIZE {
+            let s: Field = x[j] * y[i] + c[i + j] + r;
+            // TODO: Find a way to do it without using U128
+            c[i + j] = (U128::from_integer(s) % U128::from_integer(B)).to_integer();
+            r = (U128::from_integer(s) / U128::from_integer(B)).to_integer();
+        }
+        c[i+m] += r;
+    }
+
+    let mut normalized_c = [0; SIZE];
+    
+    for i in 0..SIZE {
+        normalized_c[i] = c[i];
+    }
+
+    normalized_c
 }
 
 fn find_quotient_limb<SIZE>(r: [Field; SIZE], b: [Field; SIZE]) -> Field {
     // TODO: Implement Algorithm in 4.1 
     // c.f. https://people.eecs.berkeley.edu/~fateman/282/F%20Wright%20notes/week4.pdf
-    0
+    let mut q = [0; SIZE];
+    q[0] = B - 1;
+    let mut r = sub(r, normalized_mul(b, q));
+
+    /*for i in 0..B {
+        if r[0].gt(0) {
+            q[0] = q[0] - 1;
+            r = add(r, b);
+        }
+    }*/
+    
+    q[0]
 }
 
 // c.f. https://people.eecs.berkeley.edu/~fateman/282/F%20Wright%20notes/week4.pdf - Algorithm in 4
@@ -263,13 +311,49 @@ unconstrained fn divide<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> ([Field; SI
         q[i] = find_quotient_limb(r, y);
         let mut q_i_long = [0; SIZE];
         q_i_long[i] = q[i];
-        r = sub(r, mul(q_i_long, y));
+        r = sub(r, normalized_mul(q_i_long, y));
         if i != k - 1 {
             r[n] = x[m - k + 1 + i];
         }
     }
     
     (q, r)
+}
+
+#[test]
+fn test_field_lt() {
+    let a: Field = 2;
+    let b: Field = 3;
+
+    assert(a.lt(b));
+}
+
+#[test]
+fn test_field_lte() {
+    let a: Field = 2;
+    let b: Field = 3;
+    let c: Field = 3;
+
+    assert(a.lte(b));
+    assert(b.lte(c));
+}
+
+#[test]
+fn test_field_gt() {
+    let a: Field = 2;
+    let b: Field = 3;
+
+    assert(b.gt(a));
+}
+
+#[test]
+fn test_field_gte() {
+    let a: Field = 3;
+    let b: Field = 2;
+    let c: Field = 2;
+
+    assert(a.gte(b));
+    assert(b.gte(c));
 }
 
 #[test]
@@ -359,6 +443,33 @@ fn test_add_carry() {
 
     let c = add(a, b);
     assert(c == [1, 1, 0, 0, 0, 0, 0, 0, 0]);
+}
+
+#[test]
+fn test_mul() {
+    let a: [Field; N] = [2, 0, 0, 0, 0, 0, 0, 0, 0];
+    let b: [Field; N] = [3, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    let c = normalized_mul(a, b);
+    assert(c == [6, 0, 0, 0, 0, 0, 0, 0, 0]);
+}
+
+#[test]
+fn test_mul2() {
+    let a: [Field; N] = [0xffffffffffffffffffffffffffffff, 0, 0, 0, 0, 0, 0, 0, 0];
+    let b: [Field; N] = [2, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    let c = normalized_mul(a, b);
+    assert(c == [0xfffffffffffffffffffffffffffffe, 1, 0, 0, 0, 0, 0, 0, 0]);
+}
+
+#[test]
+fn test_mul3() {
+    let a: [Field; N] = [0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0, 0, 0, 0, 0, 0, 0];
+    let b: [Field; N] = [2, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    let c = normalized_mul(a, b);
+    assert(c == [0xfffffffffffffffffffffffffffffe, 0xffffffffffffffffffffffffffffff, 1, 0, 0, 0, 0, 0, 0]);
 }
 
 /*#[test]

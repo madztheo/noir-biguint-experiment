@@ -163,6 +163,17 @@ fn shr<SIZE>(val: [Field; SIZE], n: u8) -> [Field; SIZE] {
     res
 }
 
+fn equal<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> bool {
+    let mut res = true;
+    for i in 0..SIZE {
+        if x[i] != y[i] {
+            res = false;
+        }
+    }
+
+    res
+}
+
 fn less_than<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> bool {
     let mut res = false;
     for i in 0..SIZE {
@@ -175,14 +186,7 @@ fn less_than<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> bool {
 }
 
 fn less_than_equal<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> bool {
-    let mut res = false;
-    for i in 0..SIZE {
-        if (x[SIZE - i - 1].lt(y[SIZE - i - 1])) | (x[SIZE - i - 1] == y[SIZE - i - 1]) {
-            res = true;
-        }
-    }
-
-    res
+    equal(x, y) | less_than(x, y)
 }
 
 fn greater_than<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> bool {
@@ -220,7 +224,7 @@ fn add<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> [Field; SIZE] {
 
 // c.f. https://people.eecs.berkeley.edu/~fateman/282/F%20Wright%20notes/week4.pdf - Algorithm in 2.2
 fn sub<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> [Field; SIZE] {
-    assert(less_than(y, x), "Subtraction underflow");
+    assert(less_than_equal(y, x), "Subtraction underflow");
 
     let mut r: Field = 0;
     let mut s: Field = 0;
@@ -242,8 +246,8 @@ fn sub<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> [Field; SIZE] {
     c
 }
 
+// c.f. https://people.eecs.berkeley.edu/~fateman/282/F%20Wright%20notes/week4.pdf - Second algorithm in 3
 fn normalized_mul<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> [Field; SIZE] {
-    // TODO: Implement multiplication of two big int
     let mut c: [Field; 2 * N] = [0; 2 * N];
     let m = nlimbs(x);
     let n = nlimbs(y);
@@ -269,12 +273,14 @@ fn normalized_mul<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> [Field; SIZE] {
     normalized_c
 }
 
-fn find_quotient_limb<SIZE>(r: [Field; SIZE], b: [Field; SIZE]) -> Field {
+fn find_quotient_limb<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> Field {
     // TODO: Implement Algorithm in 4.1 
     // c.f. https://people.eecs.berkeley.edu/~fateman/282/F%20Wright%20notes/week4.pdf
     let mut q = [0; SIZE];
-    q[0] = B - 1;
-    let mut r = sub(r, normalized_mul(b, q));
+    let dividend = x[0] * B + x[1];
+    let divisor = y[0];
+    q[0] = dividend / divisor;
+    let mut r = sub(x, normalized_mul(y, q));
 
     /*for i in 0..B {
         if r[0].gt(0) {
@@ -357,6 +363,22 @@ fn test_field_gte() {
 }
 
 #[test]
+fn test_equal() {
+    let a: [Field; N] = [2, 0, 0, 0, 0, 0, 0, 0, 0];
+    let b: [Field; N] = [2, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    assert(equal(a, b));
+}
+
+#[test]
+fn test_not_equal() {
+    let a: [Field; N] = [2, 0, 0, 0, 0, 0, 0, 0, 0];
+    let b: [Field; N] = [3, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    assert(!equal(a, b));
+}
+
+#[test]
 fn test_less_than() {
     let a: [Field; N] = [2, 0, 0, 0, 0, 0, 0, 0, 0];
     let b: [Field; N] = [3, 0, 0, 0, 0, 0, 0, 0, 0];
@@ -417,6 +439,14 @@ fn test_sub3() {
 
     let c = sub(a, b);
     assert(c == [0, 0xfffffffffffffffffffffffffffffe, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff]);
+}
+
+#[test]
+fn test_sub_to_zero() {
+    let a: [Field; N] = [1, 0, 0, 0, 0, 0, 0, 0, 0];
+    let b: [Field; N] = [1, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    let c = sub(a, b);
 }
 
 #[test(should_fail_with = "Subtraction underflow")]

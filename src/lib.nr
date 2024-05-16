@@ -447,6 +447,7 @@ fn test_sub_to_zero() {
     let b: [Field; N] = [1, 0, 0, 0, 0, 0, 0, 0, 0];
 
     let c = sub(a, b);
+    assert(c == [0, 0, 0, 0, 0, 0, 0, 0, 0]);
 }
 
 #[test(should_fail_with = "Subtraction underflow")]

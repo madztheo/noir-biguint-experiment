@@ -68,6 +68,10 @@ fn nbits<SIZE>(val: [Field; SIZE]) -> u64 {
         }
     }
 
+    if res == 0 {
+        res = 1;
+    }
+
     res
 }
 
@@ -83,81 +87,8 @@ fn nlimbs<SIZE>(val: [Field; SIZE]) -> u64 {
         }
     }
 
-    res
-}
-
-// We assume each Field is less than 128 bits
-fn shl_limb<SIZE>(val: [Field; SIZE], n: u8) -> ([Field; SIZE], u64) {
-    assert(n < D as u8);
-
-    let mut res = val;
-
-    let rshift: u8 = D as u8 - n;
-    let carry = if (n == 0) { 0 } else { (U128::from_integer(val[N - 1]) >> rshift).to_integer() };
-
-    if (n > 0) {
-        res[0] = (U128::from_integer(val[0]) << n).to_integer();
-        for i in 1..N {
-            res[i] = ((U128::from_integer(val) << n) | (U128::from_integer(val[i - 1]) >> rshift)).to_integer();
-        }
-    }
-
-    (res, carry)
-}
-
-// We assume each Field is less than 128 bits
-fn shl<SIZE>(val: [Field; SIZE], n: u8) -> [Field; SIZE] {
-    let mut res = [0; SIZE];
-
-    if n as u64 < L {
-        let shift_num = n / D as u8;
-        let rem = n % D as u8;
-        
-        for i in shift_num..N as u8 {
-            res[i] = val[i - shift_num];
-        }
-
-        let (new_lower, _carry) = shl_limb(res, rem);
-        res = new_lower;
-    }
-
-    res
-}
-
-// We assume each Field is less than 128 bits
-fn shr_limb<SIZE>(val: [Field; SIZE], n: u8) -> [Field; SIZE] {
-    assert(n < D as u8);
-
-    let mut res = val;
-
-    if (n > 0) {
-        let lshift = D as u8 - n;
-
-        for i in 0..N-1 {
-            res[i] = ((U128::from_integer(val[i]) >> n) | (U128::from_integer(val[i + 1]) << lshift)).to_integer();
-        }
-        res[N - 1] = (U128::from_integer(val[N - 1]) >> n).to_integer();
-    }
-
-    res
-}
-
-// We assume each Field is less than 128 bits
-fn shr<SIZE>(val: [Field; SIZE], n: u8) -> [Field; SIZE] {
-    let mut res = [0; SIZE];
-
-    if n < L as u8 {
-        let shift_num = n / D as u8;
-        let rem = n % D as u8;
-
-        // for i in 0..shift_num {
-        for i in 0..N as u8 {
-            if i + shift_num < N as u8 {
-                res[i] = val[i + shift_num];
-            }
-        }
-
-        res = shr_limb(res, rem);
+    if res == 0 {
+        res = 1;
     }
 
     res
@@ -203,7 +134,7 @@ fn add<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> [Field; SIZE] {
     let m = nlimbs(x);
     let k = m - 1;
     let mut c = [0 as Field; SIZE];
-    
+
     for i in 0..SIZE {
         let s = x[i] + y[i] + r;
         if s.lt(B) {
@@ -229,7 +160,7 @@ fn sub<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> [Field; SIZE] {
     let mut r: Field = 0;
     let mut s: Field = 0;
     let mut c = [0 as Field; SIZE];
-    
+
     for i in 0..SIZE {
         s = x[i] - y[i] - r;
         // We check that x[i] >= y[i] + r
@@ -246,6 +177,39 @@ fn sub<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> [Field; SIZE] {
     c
 }
 
+unconstrained fn unconstrained_integer_div(x: Field, y: Field) -> (Field, Field) {
+    if y == 0 {
+        (0, 0)
+    } else if x.lt(y) {
+        (0, x)
+    } else if x == y {
+        (1, 0)
+    } else {
+        let (q,r) = integer_div(x, y * 2);
+        let q_mul_2 = q * 2;
+        if r.lt(y) {
+            (q_mul_2, r)
+        } else {
+            (q_mul_2 + 1, r - y)
+        }
+    }
+}
+
+fn integer_div(x: Field, y: Field) -> (Field, Field) {
+    let (q, r) = unconstrained_integer_div(x, y);
+    let x_prime = y * q + r;
+    assert(x_prime == x, "Division error");
+    assert(r.lt(y), "Remainder error");
+    (q, r)
+}
+
+fn scalar_mul<SIZE>(x: [Field; SIZE], y: Field) -> [Field; SIZE] {
+    let mut y_arr = [0; SIZE];
+    y_arr[0] = y;
+
+    normalized_mul(x, y_arr)
+}
+
 // c.f. https://people.eecs.berkeley.edu/~fateman/282/F%20Wright%20notes/week4.pdf - Second algorithm in 3
 fn normalized_mul<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> [Field; SIZE] {
     let mut c: [Field; 2 * N] = [0; 2 * N];
@@ -253,19 +217,19 @@ fn normalized_mul<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> [Field; SIZE] {
     let n = nlimbs(y);
     let k = m + n;
     let mut r: Field = 0;
-    
+
     for i in 0..SIZE {
         for j in 0..SIZE {
             let s: Field = x[j] * y[i] + c[i + j] + r;
-            // TODO: Find a way to do it without using U128
-            c[i + j] = (U128::from_integer(s) % U128::from_integer(B)).to_integer();
-            r = (U128::from_integer(s) / U128::from_integer(B)).to_integer();
+            let (q, _r) = integer_div(s, B);
+            c[i + j] = _r;
+            r = q;
         }
         c[i+m] += r;
     }
 
     let mut normalized_c = [0; SIZE];
-    
+
     for i in 0..SIZE {
         normalized_c[i] = c[i];
     }
@@ -273,27 +237,55 @@ fn normalized_mul<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> [Field; SIZE] {
     normalized_c
 }
 
-fn find_quotient_limb<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> Field {
+fn find_quotient_limb<SIZE>(x: [Field; SIZE], y: [Field; SIZE], d: Field) -> Field {
     // TODO: Implement Algorithm in 4.1 
     // c.f. https://people.eecs.berkeley.edu/~fateman/282/F%20Wright%20notes/week4.pdf
-    let mut q = [0; SIZE];
-    let dividend = x[0] * B + x[1];
-    let divisor = y[0];
-    q[0] = dividend / divisor;
-    let mut r = sub(x, normalized_mul(y, q));
 
-    /*for i in 0..B {
-        if r[0].gt(0) {
-            q[0] = q[0] - 1;
-            r = add(r, b);
+    let mut m = nlimbs(x);
+    if (m == 1) {
+        m = 2;
+    }
+
+    let n = nlimbs(y);
+
+    let scaled_x = scalar_mul(x, d);
+    let scaled_y = scalar_mul(y, d);
+
+    //println(scaled_x);
+    //println(scaled_y);
+
+    let dividend = scaled_x[m - 1] * B + scaled_x[m - 2];
+    let divisor = scaled_y[n - 1];
+
+    // Put the value of Q_hat into Q
+    // Q_hat = min(B - 1, floor((x[0]*B + x[1]) / y[0]))
+    let (mut q, _) = integer_div(dividend, divisor);
+    if q.gte(B) {
+        q = B - 1;
+    }
+
+    let mut product = scalar_mul(scaled_y, q);
+
+    // There are only 3 iterations possible so we can rely on just
+    // if statements
+
+    // This is equivalent to checking that the remainder is negative
+    // so that we don't have to deal with negative numbers
+    if greater_than(product, scaled_x) {
+        product = sub(product, scaled_y);
+        if greater_than(product, scaled_x) {
+            q = q - 2;
+        } else {
+            q = q - 1;
         }
-    }*/
-    
-    q[0]
+    }
+
+    q
 }
 
 // c.f. https://people.eecs.berkeley.edu/~fateman/282/F%20Wright%20notes/week4.pdf - Algorithm in 4
-unconstrained fn divide<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> ([Field; SIZE], [Field; SIZE]){
+// TODO: Fix the issues, notably regarding the remainder
+unconstrained fn divide<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> ([Field; SIZE], [Field; SIZE]) {
     if less_than(x, y) {
         ([0; SIZE], x)
     }
@@ -309,20 +301,23 @@ unconstrained fn divide<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> ([Field; SI
     // TODO: Find a way to handle the proper size of r
     let mut r = [0; SIZE];
 
-    for i in 1..n {
-        r[i] = x[i-1];
+    let (d, _) = integer_div(B, y[n - 1] + 1);
+
+    for i in 0..n {
+        r[i] = x[i];
     }
 
     for i in 0..k {
-        q[i] = find_quotient_limb(r, y);
-        let mut q_i_long = [0; SIZE];
-        q_i_long[i] = q[i];
-        r = sub(r, normalized_mul(q_i_long, y));
+        q[k - i - 1] = find_quotient_limb(r, y, d);
+        r = sub(r, scalar_mul(y, q[k - i - 1]));
         if i != k - 1 {
-            r[n] = x[m - k + 1 + i];
+            r[0] = x[m - (n + i) - 1];
         }
     }
-    
+
+    //assert(x == add(normalized_mul(q, y), r), "Division error");
+    //assert(less_than_equal(r, y), "Remainder error");
+
     (q, r)
 }
 
@@ -434,11 +429,17 @@ fn test_sub2() {
 
 #[test]
 fn test_sub3() {
-    let a: [Field; N] = [0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff];
+    let a: [Field; N] = [
+        0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff
+    ];
     let b: [Field; N] = [0xffffffffffffffffffffffffffffff, 1, 0, 0, 0, 0, 0, 0, 0];
 
     let c = sub(a, b);
-    assert(c == [0, 0xfffffffffffffffffffffffffffffe, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff]);
+    assert(
+        c == [
+            0, 0xfffffffffffffffffffffffffffffe, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff
+        ]
+    );
 }
 
 #[test]
@@ -477,6 +478,15 @@ fn test_add_carry() {
 }
 
 #[test]
+fn test_add_to_zero() {
+    let a: [Field; N] = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let b: [Field; N] = [3, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    let c = add(a, b);
+    assert(c == [3, 0, 0, 0, 0, 0, 0, 0, 0]);
+}
+
+#[test]
 fn test_mul() {
     let a: [Field; N] = [2, 0, 0, 0, 0, 0, 0, 0, 0];
     let b: [Field; N] = [3, 0, 0, 0, 0, 0, 0, 0, 0];
@@ -503,14 +513,29 @@ fn test_mul3() {
     assert(c == [0xfffffffffffffffffffffffffffffe, 0xffffffffffffffffffffffffffffff, 1, 0, 0, 0, 0, 0, 0]);
 }
 
-/*#[test]
+#[test]
 fn test_divide() {
-    let a: [Field; N] = [6, 0, 0, 0, 0, 0, 0, 0, 0];
+    let a: [Field; N] = [15, 0, 0, 0, 0, 0, 0, 0, 0];
+    let b: [Field; N] = [3, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    let (q, r) = divide(a, b);
+    println(q);
+    println(r);
+
+    assert(q == [5, 0, 0, 0, 0, 0, 0, 0, 0]);
+    assert(r == [0, 0, 0, 0, 0, 0, 0, 0, 0]);
+}
+
+#[test]
+fn test_divide_with_remainder() {
+    // Currently not working properly
+    let a: [Field; N] = [13, 0, 0, 0, 0, 0, 0, 0, 0];
     let b: [Field; N] = [2, 0, 0, 0, 0, 0, 0, 0, 0];
 
     let (q, r) = divide(a, b);
     println(q);
     println(r);
 
-    // TODO: Test that the result of the division is correct
-}*/
+    assert(q == [6, 0, 0, 0, 0, 0, 0, 0, 0]);
+    assert(r == [1, 0, 0, 0, 0, 0, 0, 0, 0]);
+}

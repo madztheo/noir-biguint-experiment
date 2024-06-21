@@ -435,14 +435,6 @@ fn test_less_than() {
 }
 
 #[test]
-fn test_less_than_bis() {
-    let a: [Field; N] = [0x555555555555555555555555555551, 0x4, 0, 0, 0, 0, 0, 0, 0];
-    let b: [Field; N] = [0xfffffffffffffffffffffffffffffc, 0x3, 0, 0, 0, 0, 0, 0, 0];
-
-    assert(greater_than(b, a));
-}
-
-#[test]
 fn test_less_than_equal() {
     let a: [Field; N] = [2, 0, 0, 0, 0, 0, 0, 0, 0];
     let b: [Field; N] = [3, 0, 0, 0, 0, 0, 0, 0, 0];

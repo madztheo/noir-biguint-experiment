@@ -97,19 +97,19 @@ fn nlimbs<SIZE>(val: [Field; SIZE]) -> u64 {
 /**
 * Compare two big integers x and y and return:
 * 0 if x == y
-* 1 if x < y
-* 2 if x > y
+* -1 if x < y
+* 1 if x > y
 */
-fn compare<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> u8 {
+fn compare<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> i1 {
     let mut r = 0;
     let mut stop = false;
     for i in 0..SIZE {
         let real_index: i32 = SIZE - i - 1;
         if (x[real_index] != y[real_index]) & (stop == false) {
             if (x[real_index].lt(y[real_index])) {
-                r = 1;
+                r = -1;
             } else {
-                r = 2;
+                r = 1;
             }
             stop = true;
         }
@@ -130,9 +130,12 @@ fn equal<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> bool {
 }
 
 fn less_than<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> bool {
-    let res = compare(x, y);
-    // 1 means that x is less than y
-    res == 1
+    let r = compare(x, y);
+    println("Less than");
+    // -1 means that x is less than y
+    println(r);
+    println(r == -1);
+    r == -1
 }
 
 fn less_than_equal<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> bool {
@@ -141,8 +144,11 @@ fn less_than_equal<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> bool {
 
 fn greater_than<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> bool {
     let r = compare(x, y);
-    // 2 means that x is greater than y
-    r == 2
+    println("Greater than");
+    // 1 means that x is greater than y
+    println(r);
+    println(r == 1);
+    r == 1
 }
 
 fn greater_than_equal<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> bool {
@@ -435,14 +441,6 @@ fn test_less_than() {
 }
 
 #[test]
-fn test_less_than_bis() {
-    let a: [Field; N] = [0x555555555555555555555555555551, 0x4, 0, 0, 0, 0, 0, 0, 0];
-    let b: [Field; N] = [0xfffffffffffffffffffffffffffffc, 0x3, 0, 0, 0, 0, 0, 0, 0];
-
-    assert(greater_than(b, a));
-}
-
-#[test]
 fn test_less_than_equal() {
     let a: [Field; N] = [2, 0, 0, 0, 0, 0, 0, 0, 0];
     let b: [Field; N] = [3, 0, 0, 0, 0, 0, 0, 0, 0];
@@ -456,6 +454,14 @@ fn test_less_than_equal() {
 fn test_greater_than() {
     let a: [Field; N] = [2, 0, 0, 0, 0, 0, 0, 0, 0];
     let b: [Field; N] = [3, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    assert(greater_than(b, a));
+}
+
+#[test]
+fn test_greater_than_bis() {
+    let a: [Field; N] = [0x555555555555555555555555555551, 0x4, 0, 0, 0, 0, 0, 0, 0];
+    let b: [Field; N] = [0xfffffffffffffffffffffffffffffc, 0x3, 0, 0, 0, 0, 0, 0, 0];
 
     assert(greater_than(b, a));
 }

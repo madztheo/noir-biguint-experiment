@@ -119,14 +119,8 @@ fn compare<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> u8 {
 }
 
 fn equal<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> bool {
-    let mut res = true;
-    for i in 0..SIZE {
-        if x[i] != y[i] {
-            res = false;
-        }
-    }
-
-    res
+    let res = compare(x, y);
+    res == 0
 }
 
 fn less_than<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> bool {
@@ -136,7 +130,10 @@ fn less_than<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> bool {
 }
 
 fn less_than_equal<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> bool {
-    equal(x, y) | less_than(x, y)
+    // We repeat ourselves a bit here and don't call equal and less_than
+    // so that we can call compare only once
+    let r = compare(x, y);
+    (r == 0) | (r == 1)
 }
 
 fn greater_than<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> bool {
@@ -146,7 +143,10 @@ fn greater_than<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> bool {
 }
 
 fn greater_than_equal<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> bool {
-    equal(x, y) | greater_than(x, y)
+    // We repeat ourselves a bit here and don't call equal and greater_than
+    // so that we can call compare only once
+    let r = compare(x, y);
+    (r == 0) | (r == 2)
 }
 
 // c.f. https://people.eecs.berkeley.edu/~fateman/282/F%20Wright%20notes/week4.pdf - Algorithm in 2.1 
@@ -198,6 +198,7 @@ fn sub<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> [Field; SIZE] {
     c
 }
 
+// TODO: Improve the performance of this integer division between two Field
 unconstrained fn unconstrained_integer_div(x: Field, y: Field) -> (Field, Field) {
     if y == 0 {
         (0, 0)
@@ -266,26 +267,24 @@ fn normalized_mul<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> [Field; SIZE] {
     normalized_c
 }
 
+// c.f. https://people.eecs.berkeley.edu/~fateman/282/F%20Wright%20notes/week4.pdf - Algorithm in 4.1
 fn find_quotient_limb<SIZE>(x: [Field; SIZE], y: [Field; SIZE], d: Field) -> Field {
-    // c.f. https://people.eecs.berkeley.edu/~fateman/282/F%20Wright%20notes/week4.pdf
-
-    let mut m = nlimbs(x);
-    if (m == 1) {
-        m = 2;
-    }
-
-    let n = nlimbs(y);
+    let mut n = nlimbs(y);
 
     let scaled_x = scalar_mul(x, d);
     let scaled_y = scalar_mul(y, d);
 
-    let dividend = scaled_x[m - 1] * B + scaled_x[m - 2];
+    // Q_hat = min(B - 1, floor((x[0]*B + x[1]) / y[0]))
+    // With index 0 and 1 assuming that the limbs are 
+    // from the most significant to the least significant
+    // Which is the opposite of the order used here
+    let dividend = scaled_x[n] * B + scaled_x[n - 1];
     let divisor = scaled_y[n - 1];
 
     // Put the value of Q_hat into Q
-    // Q_hat = min(B - 1, floor((x[0]*B + x[1]) / y[0]))
     let (mut q, _) = integer_div(dividend, divisor);
-    if q.gte(B) {
+
+    if q.gt(B - 1) {
         q = B - 1;
     }
 
@@ -309,7 +308,6 @@ fn find_quotient_limb<SIZE>(x: [Field; SIZE], y: [Field; SIZE], d: Field) -> Fie
 }
 
 // c.f. https://people.eecs.berkeley.edu/~fateman/282/F%20Wright%20notes/week4.pdf - Algorithm in 4
-// TODO: Fix the issues, notably regarding the remainder
 unconstrained fn divide<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> ([Field; SIZE], [Field; SIZE]) {
     if less_than(x, y) {
         ([0; SIZE], x)
@@ -339,6 +337,10 @@ unconstrained fn divide<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> ([Field; SI
         resized_y[i] = y[i];
     }
 
+    // d is the scaling factor use to scale x and y
+    // so that the most significant limb of y is at least B/2
+    // which is a necessary condition for the following algorithm
+    // to work
     let (d, _) = integer_div(B, y[n - 1] + 1);
 
     // Initiate the remainder to the first n limbs of x
@@ -356,13 +358,18 @@ unconstrained fn divide<SIZE>(x: [Field; SIZE], y: [Field; SIZE]) -> ([Field; SI
         q[real_index] = find_quotient_limb(r, resized_y, d);
         r = sub(r, scalar_mul(resized_y, q[real_index]));
         if i != k - 1 {
+            let mut shifted_r = [0; N + 1];
             for j in 0..n {
-                r[j + 1] = r[j];
+                shifted_r[j + 1] = r[j];
             }
+            r = shifted_r;
+            // Take down the following limb of x into the dividend
             r[0] = resized_x[m - n - i - 1];
         }
     }
 
+    // The following two asserts should be used to check that the division
+    // is correct in constrained code
     //assert(x == add(normalized_mul(q, y), r), "Division error");
     //assert(less_than_equal(r, y), "Remainder error");
 
@@ -572,8 +579,6 @@ fn test_divide() {
     let b: [Field; N] = [3, 0, 0, 0, 0, 0, 0, 0, 0];
 
     let (q, r) = divide(a, b);
-    println(q);
-    println(r);
 
     assert(q == [5, 0, 0, 0, 0, 0, 0, 0, 0]);
     assert(r == [0, 0, 0, 0, 0, 0, 0, 0, 0]);
@@ -585,8 +590,6 @@ fn test_divide_with_remainder() {
     let b: [Field; N] = [2, 0, 0, 0, 0, 0, 0, 0, 0];
 
     let (q, r) = divide(a, b);
-    println(q);
-    println(r);
 
     assert(q == [6, 0, 0, 0, 0, 0, 0, 0, 0]);
     assert(r == [1, 0, 0, 0, 0, 0, 0, 0, 0]);
@@ -598,8 +601,6 @@ fn test_divide_with_large_limb() {
     let b: [Field; N] = [2, 0, 0, 0, 0, 0, 0, 0, 0];
 
     let (q, r) = divide(a, b);
-    println(q);
-    println(r);
 
     assert(q == [0x7fffffffffffffffffffffffffffff, 0, 0, 0, 0, 0, 0, 0, 0]);
     assert(r == [1, 0, 0, 0, 0, 0, 0, 0, 0]);
@@ -611,8 +612,6 @@ fn test_divide_with_two_limbs() {
     let b: [Field; N] = [3, 0, 0, 0, 0, 0, 0, 0, 0];
 
     let (q, r) = divide(a, b);
-    println(q);
-    println(r);
 
     assert(q == [0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, 0xaa, 0, 0, 0, 0, 0, 0, 0]);
     assert(r == [1, 0, 0, 0, 0, 0, 0, 0, 0]);
@@ -624,8 +623,6 @@ fn test_divide_with_three_limbs() {
     let b: [Field; N] = [3, 0, 0, 0, 0, 0, 0, 0, 0];
 
     let (q, r) = divide(a, b);
-    println(q);
-    println(r);
 
     assert(
         q
@@ -642,8 +639,6 @@ fn test_divide_with_large_biguint() {
     let b: [Field; N] = [2, 0, 0, 0, 0, 0, 0, 0, 0];
 
     let (q, r) = divide(a, b);
-    println(q);
-    println(r);
 
     assert(
         q == [
@@ -661,8 +656,6 @@ fn test_divide_with_large_biguint_2() {
     let b: [Field; N] = [2, 0, 0, 0, 0, 0, 0, 0, 0];
 
     let (q, r) = divide(a, b);
-    println(q);
-    println(r);
 
     assert(
         q == [
@@ -680,8 +673,6 @@ fn test_divide_with_large_biguint_3() {
     let b: [Field; N] = [0xffffffffffffffffffffffffffffff, 0, 0, 0, 0, 0, 0, 0, 0];
 
     let (q, r) = divide(a, b);
-    println(q);
-    println(r);
 
     assert(q == [1, 1, 1, 1, 1, 1, 1, 1, 1]);
     assert(r == [0, 0, 0, 0, 0, 0, 0, 0, 0]);
@@ -695,8 +686,6 @@ fn test_divide_with_large_biguint_4() {
     let b: [Field; N] = [0xffffffffffffffffffffffffffffff, 0xffffffffffffffffffffffffffffff, 0, 0, 0, 0, 0, 0, 0];
 
     let (q, r) = divide(a, b);
-    println(q);
-    println(r);
 
     assert(q == [0, 1, 0, 1, 0, 1, 0, 1, 0]);
     assert(r == [0xffffffffffffffffffffffffffffff, 0, 0, 0, 0, 0, 0, 0, 0]);
@@ -712,8 +701,6 @@ fn test_divide_with_large_biguint_5() {
     ];
 
     let (q, r) = divide(a, b);
-    println(q);
-    println(r);
 
     assert(q == [1, 0, 0, 0, 0, 0, 0, 0, 0]);
     assert(r == [0, 0, 0, 0, 0, 0, 0, 0, 0]);
